@@ -1,0 +1,46 @@
+# ──────────────────────────────────────────────────────────
+# 微信 AI 个人助手配置模板
+# 复制为 config.yaml 后按提示填写
+# ──────────────────────────────────────────────────────────
+
+wechat:
+  # 微信数据库存储目录
+  # macOS: ~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/YOUR_WXID/db_storage
+  db_dir: ""
+
+  # 你的微信 wxid（用于判断消息是"我"发的还是别人发的）
+  self_wxid: ""
+
+  # 解密后的数据库目录（相对于本文件所在目录）
+  decrypted_dir: "./decrypted"
+
+  # 采集数据库路径
+  collector_db: "./collector.db"
+
+  # 密钥文件（find_all_keys_macos 输出）
+  keys_file: "./all_keys.json"
+
+monitor:
+  # 干货收集监控的群（chatroom_id 列表）
+  groups:
+    - "12345@chatroom"
+
+  # 日程扫描包含的工作群（chatroom_id → 群名 映射）
+  work_groups:
+    "12345@chatroom": "群名"
+
+state:
+  # 待办数据文件
+  todos_file: "./todos.json"
+  # 待办状态文件
+  todo_state_file: "./todo_state.json"
+  # 日程同步状态文件
+  calendar_state_file: "./calendar_sync_state.json"
+
+# Obsidian vault 路径（可选，干货归档用）
+# obsidian_vault: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault"
+
+# SSH 配置（可选，仅当 OpenClaw 和微信不在同一台机器时）
+# ssh:
+#   host: "user@192.168.1.100"
+#   password: "xxx"

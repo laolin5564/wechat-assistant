@@ -1,0 +1,16 @@
+# 敏感文件
+config.yaml
+all_keys.json
+*.json
+!config.example.yaml
+
+# 数据
+collector.db
+collector.db-wal
+collector.db-shm
+decrypted/
+
+# 编译产物
+scripts/decrypt/find_all_keys_macos
+__pycache__/
+*.pyc

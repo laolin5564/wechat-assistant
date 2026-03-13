@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""
+WeChat 4.0 数据库解密器
+
+使用从进程内存提取的 per-DB enc_key 解密 SQLCipher 4 加密的数据库。
+参数: SQLCipher 4, AES-256-CBC, HMAC-SHA512, reserve=80, page_size=4096
+密钥来源: all_keys.json (由 find_all_keys_macos 从内存提取)
+
+用法:
+  python3 decrypt_db.py --config /path/to/config.yaml
+"""
+import hashlib
+import hmac as hmac_mod
+import json
+import os
+import struct
+import sys
+import argparse
+
+from Crypto.Cipher import AES
+
+PAGE_SZ = 4096
+KEY_SZ = 32
+SALT_SZ = 16
+IV_SZ = 16
+HMAC_SZ = 64
+RESERVE_SZ = 80  # IV(16) + HMAC(64)
+SQLITE_HDR = b'SQLite format 3\x00'
+
+
+def derive_mac_key(enc_key, salt):
+    """从 enc_key 派生 HMAC 密钥"""
+    mac_salt = bytes(b ^ 0x3a for b in salt)
+    return hashlib.pbkdf2_hmac("sha512", enc_key, mac_salt, 2, dklen=KEY_SZ)
+
+
+def decrypt_page(enc_key, page_data, pgno):
+    """解密单个页面，输出 4096 字节的标准 SQLite 页面"""
+    iv = page_data[PAGE_SZ - RESERVE_SZ: PAGE_SZ - RESERVE_SZ + IV_SZ]
+
+    if pgno == 1:
+        encrypted = page_data[SALT_SZ: PAGE_SZ - RESERVE_SZ]
+        cipher = AES.new(enc_key, AES.MODE_CBC, iv)
+        decrypted = cipher.decrypt(encrypted)
+        page = bytearray(SQLITE_HDR + decrypted + b'\x00' * RESERVE_SZ)
+        return bytes(page)
+    else:
+        encrypted = page_data[:PAGE_SZ - RESERVE_SZ]
+        cipher = AES.new(enc_key, AES.MODE_CBC, iv)
+        decrypted = cipher.decrypt(encrypted)
+        return decrypted + b'\x00' * RESERVE_SZ
+
+
+def decrypt_database(db_path, out_path, enc_key):
+    """解密整个数据库文件。成功返回 True。"""
+    file_size = os.path.getsize(db_path)
+    total_pages = file_size // PAGE_SZ
+
+    if file_size % PAGE_SZ != 0:
+        print(f"  [WARN] 文件大小 {file_size} 不是 {PAGE_SZ} 的倍数")
+        total_pages += 1
+
+    with open(db_path, 'rb') as fin:
+        page1 = fin.read(PAGE_SZ)
+
+    if len(page1) < PAGE_SZ:
+        print(f"  [ERROR] 文件太小")
+        return False
+
+    # 提取 salt 并派生 mac_key，验证 page 1
+    salt = page1[:SALT_SZ]
+    mac_key = derive_mac_key(enc_key, salt)
+    p1_hmac_data = page1[SALT_SZ: PAGE_SZ - RESERVE_SZ + IV_SZ]
+    p1_stored_hmac = page1[PAGE_SZ - HMAC_SZ: PAGE_SZ]
+    hm = hmac_mod.new(mac_key, p1_hmac_data, hashlib.sha512)
+    hm.update(struct.pack('<I', 1))
+    if hm.digest() != p1_stored_hmac:
+        print(f"  [ERROR] Page 1 HMAC 验证失败! salt: {salt.hex()}")
+        return False
+
+    print(f"  HMAC OK, {total_pages} pages")
+
+    # 解密所有页面
+    os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+    with open(db_path, 'rb') as fin, open(out_path, 'wb') as fout:
+        for pgno in range(1, total_pages + 1):
+            page = fin.read(PAGE_SZ)
+            if len(page) < PAGE_SZ:
+                if len(page) > 0:
+                    page = page + b'\x00' * (PAGE_SZ - len(page))
+                else:
+                    break
+
+            decrypted = decrypt_page(enc_key, page, pgno)
+            fout.write(decrypted)
+
+            if pgno == 1:
+                if decrypted[:16] != SQLITE_HDR:
+                    print(f"  [WARN] 解密后 header 不匹配!")
+
+            if pgno % 10000 == 0:
+                print(f"  进度: {pgno}/{total_pages} ({100 * pgno / total_pages:.1f}%)")
+
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description='WeChat 4.0 数据库解密器')
+    parser.add_argument('--config', required=True, help='YAML 配置文件路径')
+    args = parser.parse_args()
+
+    from config import load_config
+    cfg = load_config(args.config)
+
+    db_dir = cfg['db_dir']
+    out_dir = cfg['decrypted_dir']
+    keys_file = cfg['keys_file']
+
+    print("=" * 60)
+    print("  WeChat 4.0 数据库解密器")
+    print("=" * 60)
+
+    if not os.path.exists(keys_file):
+        print(f"[ERROR] 密钥文件不存在: {keys_file}")
+        print("请先运行 find_all_keys_macos")
+        sys.exit(1)
+
+    if not db_dir or not os.path.isdir(db_dir):
+        print(f"[ERROR] 微信数据库目录不存在: {db_dir}")
+        print("请在 config.yaml 中正确配置 wechat.db_dir")
+        sys.exit(1)
+
+    with open(keys_file) as f:
+        keys = json.load(f)
+
+    keys.pop("_db_dir", None)
+    print(f"\n加载 {len(keys)} 个数据库密钥")
+    print(f"输出目录: {out_dir}")
+    os.makedirs(out_dir, exist_ok=True)
+
+    # 收集所有 DB 文件
+    db_files = []
+    for root, dirs, files in os.walk(db_dir):
+        for f in files:
+            if f.endswith('.db') and not f.endswith('-wal') and not f.endswith('-shm'):
+                path = os.path.join(root, f)
+                rel = os.path.relpath(path, db_dir).replace('\\', '/')
+                sz = os.path.getsize(path)
+                db_files.append((rel, path, sz))
+
+    db_files.sort(key=lambda x: x[2])  # 从小到大
+
+    print(f"找到 {len(db_files)} 个数据库文件\n")
+
+    success = 0
+    failed = 0
+    total_bytes = 0
+
+    for rel, path, sz in db_files:
+        rel_key = rel.replace('\\', '/')
+        if rel_key not in keys:
+            print(f"SKIP: {rel} (无密钥)")
+            failed += 1
+            continue
+
+        enc_key = bytes.fromhex(keys[rel_key]["enc_key"])
+        out_path = os.path.join(out_dir, rel)
+
+        print(f"解密: {rel} ({sz / 1024 / 1024:.1f}MB) ...", end=" ")
+
+        ok = decrypt_database(path, out_path, enc_key)
+        if ok:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(out_path)
+                tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                conn.close()
+                table_names = [t[0] for t in tables]
+                print(f"  OK! 表: {', '.join(table_names[:5])}", end="")
+                if len(table_names) > 5:
+                    print(f" ...共{len(table_names)}个", end="")
+                print()
+                success += 1
+                total_bytes += sz
+            except Exception as e:
+                print(f"  [WARN] SQLite 验证失败: {e}")
+                failed += 1
+        else:
+            failed += 1
+
+    print(f"\n{'=' * 60}")
+    print(f"结果: {success} 成功, {failed} 失败, 共 {len(db_files)} 个")
+    print(f"解密数据量: {total_bytes / 1024 / 1024 / 1024:.1f}GB")
+    print(f"解密文件在: {out_dir}")
+
+
+if __name__ == '__main__':
+    main()
