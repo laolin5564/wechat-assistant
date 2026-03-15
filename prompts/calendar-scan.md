@@ -75,39 +75,29 @@ end tell'
 
 ### 5. 推送到 Discord Forum
 
-推送到论坛频道 `{{calendar_forum_id}}`。
-
-> **发帖方式**：使用 OpenClaw `message` 工具，`action=thread-create`，`target={{calendar_forum_id}}`，
-> `threadName=帖子标题`，`message=帖子内容`，`appliedTags=["tag名称"]`。
->
-> ⚠️ 如果 `message(action=thread-create)` 报错，改用 `exec` 执行 curl：
-> ```bash
-> curl -s -X POST "https://discord.com/api/v10/channels/{{calendar_forum_id}}/threads" \
->   -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
->   -H "Content-Type: application/json" \
->   -d '{"name":"帖子标题","applied_tags":["tag_id"],"message":{"content":"帖子内容"}}'
-> ```
-> Tag IDs 需要先用 `curl GET /channels/{{calendar_forum_id}}` 查 `available_tags` 获取。
-
-#### 5a. 去重 + 过期检查
-
-先获取论坛已有帖子：
+#### 5a. 读取已有帖子列表
 
 ```
-message(action="thread-list", target="{{calendar_forum_id}}")
+message(action="thread-list", target="{{forum_id}}")
 ```
 
-- 按**事件标题 + 时间**匹配，避免重复创建
-- 检查已有帖子中是否有**已过期**的日程（事件时间已过），标记关闭：
-  用 `message(action="thread-reply", threadId=原帖ID, message="✅ 日程已过")` 回复
+#### 5b. 过期检查
 
-#### 5b. 每条日程 → 一个帖子
+检查已有帖子中带 📅日程 tag 的，如果事件时间已过：
+- 回复原帖：`message(action="thread-reply", threadId=原帖ID, message="✅ 日程已过")`
+- 关帖（archive）
 
-对每条新日程，创建论坛帖子：
+#### 5c. 去重检查
+
+按**事件标题 + 时间**匹配，避免重复创建。
+
+#### 5d. 新日程发帖
+
+对每条新日程，发帖到 `{{forum_id}}`，`appliedTags=["📅日程"]`：
 
 - **帖子标题**：
-  - 已确认：`[📌已确认] 事件标题 — 3月15日 15:00`
-  - 待确认：`[🤔待确认] 事件标题`
+  - 已确认：`📌 事件标题 — 3月15日 15:00`
+  - 待确认：`🤔 事件标题 — 待确认`
 - **帖子内容**：
   ```
   📅 **日程详情**
@@ -123,8 +113,19 @@ message(action="thread-list", target="{{calendar_forum_id}}")
 
   🗓️ 已添加到 Apple Calendar（如已创建）
   ```
-- **appliedTags**：
-  - 已确认 → `["📌已确认"]`
-  - 待确认 → `["🤔待确认"]`
 
-如果没有日程，不发消息。
+无日程则不发消息。
+
+#### 5e. 发帖方式说明
+
+> 使用 OpenClaw `message` 工具，`action=thread-create`，`target={{forum_id}}`，
+> `threadName=帖子标题`，`message=帖子内容`，`appliedTags=["📅日程"]`。
+>
+> ⚠️ 如果 `message(action=thread-create)` 报错，改用 `exec` 执行 curl：
+> ```bash
+> curl -s -X POST "https://discord.com/api/v10/channels/{{forum_id}}/threads" \
+>   -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+>   -H "Content-Type: application/json" \
+>   -d '{"name":"帖子标题","applied_tags":["tag_id"],"message":{"content":"帖子内容"}}'
+> ```
+> Tag IDs 需要先用 `curl GET /channels/{{forum_id}}` 查 `available_tags` 获取。

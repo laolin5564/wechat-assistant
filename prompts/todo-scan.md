@@ -74,42 +74,51 @@ path = '{{config_path}}'.replace('config.yaml', '') + 'todos.json'
 或直接用 `read` + `write` 工具操作文件。
 
 更新规则：
-- 新增的待办：`status: "open"`，含 `contact`, `summary`, `urgent`, `created`
+- 新增的待办：`status: "open"`，含 `contact`, `summary`, `urgent`, `created`, `forum_thread_id`（初始为 null，发帖后回填）, `last_mentioned`（初始为 created 时间）
 - 已解决的：`status: "done"`，加 `resolved_date`
 
-### 5. 推送到 Discord Forum
+### 5. 推送到 Discord Forum + 闭环追踪
 
-**只在有变化时**（新增或完成）推送到论坛频道 `{{todo_forum_id}}`。
-
-> **发帖方式**：使用 OpenClaw `message` 工具，`action=thread-create`，`target={{todo_forum_id}}`，
-> `threadName=帖子标题`，`message=帖子内容`，`appliedTags=["tag名称"]`。
->
-> ⚠️ 如果 `message(action=thread-create)` 报错，改用 `exec` 执行 curl：
-> ```bash
-> curl -s -X POST "https://discord.com/api/v10/channels/{{todo_forum_id}}/threads" \
->   -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
->   -H "Content-Type: application/json" \
->   -d '{"name":"帖子标题","applied_tags":["tag_id"],"message":{"content":"帖子内容"}}'
-> ```
-> Tag IDs 需要先用 `curl GET /channels/{{todo_forum_id}}` 查 `available_tags` 获取。
-
-#### 5a. 去重检查
-
-发帖前，先搜索论坛已有帖子，避免重复：
+#### 5a. 读取已有帖子列表
 
 ```
-message(action="thread-list", target="{{todo_forum_id}}")
+message(action="thread-list", target="{{forum_id}}")
 ```
 
-检查返回的帖子列表，按**联系人 + 关键词**匹配。如果已有相同待办的帖子，跳过创建。
+#### 5b. 读取 todos.json 中所有 status="open" 的待办
 
-#### 5b. 新增待办 → 每条一个帖子
+每条 open 的待办都有 `forum_thread_id` 字段（关联 Forum 帖子）。
 
-对每条**新增**待办，创建一个论坛帖子：
+#### 5c. 用户手动关帖检测
 
+检查 5a 获取的帖子列表中，是否有 open 待办对应的帖子已被**用户手动关闭（archived）**：
+- 如果帖子已 archived 但 todos.json 中还是 `"open"` → 说明用户手动完成了
+- todos.json 中 `status` 改为 `"done"`，加 `resolved_date`
+- 跳过该待办的后续检查
+
+#### 5d. 对话闭环检查
+
+对每条仍然 open 的待办，检查本次提取的对话中是否有状态变化：
+
+1. **完成信号**（对方说"搞定了""已处理""OK""好的""done"等，或我说"已完成""搞定"等）→
+   - 回复原帖：`message(action="thread-reply", threadId=forum_thread_id, message="✅ 已完成 — YYYY-MM-DD")`
+   - 关帖（archive）
+   - todos.json 中 `status` 改为 `"done"`，加 `resolved_date`
+2. **对方催促**（对方再次提到同一件事、催问进度）→
+   - 回复原帖：`message(action="thread-reply", threadId=forum_thread_id, message="🔔 对方再次提及（YYYY-MM-DD HH:MM）")`
+   - 更新 todos.json 的 `last_mentioned`
+3. **超时提醒**（open 超过 7 天且 `last_mentioned` 超过 3 天）→
+   - 回复原帖：`message(action="thread-reply", threadId=forum_thread_id, message="⏰ 已 N 天未跟进")`
+4. **无变化** → 跳过，不发任何消息
+
+#### 5e. 新增待办发帖
+
+对每条新发现的待办：
+
+- 发帖到 `{{forum_id}}`，`appliedTags=["📋待办"]`
 - **帖子标题**：
-  - 紧急：`[🔴紧急] 联系人 — 待办摘要`
-  - 跟进：`[🟡跟进] 联系人 — 待办摘要`
+  - 紧急：`🔴 联系人 — 待办摘要`
+  - 跟进：`🟡 联系人 — 待办摘要`
 - **帖子内容**：
   ```
   📋 **待办详情**
@@ -122,16 +131,20 @@ message(action="thread-list", target="{{todo_forum_id}}")
   💬 **来源对话摘录**
   > 相关对话内容...
   ```
-- **appliedTags**：
-  - 紧急 → `["🔴紧急"]`
-  - 跟进 → `["🟡跟进"]`
+- 拿到返回的 thread_id，写入 todos.json 的 `forum_thread_id` 字段
 
-#### 5c. 已完成待办 → 回复原帖并标记
+#### 5f. 发帖方式说明
 
-对每条**已解决**的待办：
+> 使用 OpenClaw `message` 工具，`action=thread-create`，`target={{forum_id}}`，
+> `threadName=帖子标题`，`message=帖子内容`，`appliedTags=["📋待办"]`。
+>
+> ⚠️ 如果 `message(action=thread-create)` 报错，改用 `exec` 执行 curl：
+> ```bash
+> curl -s -X POST "https://discord.com/api/v10/channels/{{forum_id}}/threads" \
+>   -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+>   -H "Content-Type: application/json" \
+>   -d '{"name":"帖子标题","applied_tags":["tag_id"],"message":{"content":"帖子内容"}}'
+> ```
+> Tag IDs 需要先用 `curl GET /channels/{{forum_id}}` 查 `available_tags` 获取。
 
-1. 在 5a 的帖子列表中查找对应的原帖（按联系人 + 关键词匹配）
-2. 如果找到原帖，用 `message(action="thread-reply", threadId=原帖ID, message="✅ 已完成 — YYYY-MM-DD")` 回复
-3. 如果找不到原帖，跳过（不单独创建完成帖子）
-
-如果没有变化（无新增、无完成），不发任何消息。
+无变化则不发任何消息。

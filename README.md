@@ -3,8 +3,9 @@
 </p>
 
 <p align="center">
-  <b>OpenClaw Skill</b> — 微信 AI 个人助手，自动从微信聊天中提取待办、日程、干货，推送到 Discord。
-  <br>已在多台 Mac 上验证通过（macOS 14/15，微信 4.0+，Python 3.9/3.13）
+  <b>OpenClaw Skill</b> — 微信 AI 个人助手，自动从微信聊天中提取待办、日程、干货，推送到 Discord Forum，闭环追踪任务状态。
+  <br>念念不忘，必有回响 — Important messages always echo back.
+  <br>已在多台 Mac 上验证通过（macOS 14/15，微信 4.0+，Python 3.9/3.13），Windows 基础兼容
 </p>
 
 ---
@@ -104,7 +105,7 @@ SKILL.md                       ── Agent 读这个
 |--------|------|
 | `{{config_path}}` | config.yaml 绝对路径 |
 | `{{skill_dir}}` | skill 根目录 |
-| `{{thread_id}}` | Discord 子区 ID |
+| `{{forum_id}}` | Discord Forum 频道 ID |
 | `{{groups}}` | 监控群 ID（逗号分隔） |
 | `{{ssh_host}}` | 微信机器 SSH 地址（本机留空） |
 
@@ -117,7 +118,7 @@ SKILL.md                       ── Agent 读这个
 | 级别 | 问题 | 说明 |
 |------|------|------|
 | 🔴 | 微信重启后密钥失效 | 需重新 `sudo find_all_keys_macos` |
-| 🔴 | macOS Only | Windows 需要不同的内存扫描 |
+| 🟡 | Windows 密钥提取 | 基础编码兼容已完成，密钥提取待适配 |
 | 🟡 | 首次同步慢 | 历史消息多时几分钟，可 `--chatroom` 分批 |
 | 🟡 | DB 结构差异 | 已兼容多种列名，可能有遗漏 |
 

@@ -2,7 +2,7 @@
 
 ## 任务
 
-从微信监控群中提炼昨天的干货内容，推送到 Discord 并归档到 Obsidian。
+从微信监控群中提炼昨天的干货内容，推送到 Discord Forum。
 
 ## 执行步骤
 
@@ -55,11 +55,13 @@ python3 extract_digest.py --config {{config_path}} --groups "{{groups}}" --date 
 - 已被大量转发的陈旧信息
 - 拉票、投票、砍价类
 
-### 4. 推送到 Discord
+### 4. 推送到 Discord Forum
 
-发送到 thread {{thread_id}}：
+发帖到 `{{forum_id}}`，`appliedTags=["📰干货"]`。
 
-格式：
+- **帖子标题**：`📰 YYYY-MM-DD 群聊精华`
+- **帖子内容**：
+
 ```
 📰 **YYYY-MM-DD 微信群干货日报**
 
@@ -91,22 +93,18 @@ python3 extract_digest.py --config {{config_path}} --groups "{{groups}}" --date 
 📊 统计：X 个群 · Y 条干货 · Z 条过滤
 ```
 
-如果所有群都没有干货，发一条简短的"昨天群里没什么干货"。
+如果所有群都没有干货，不发任何消息。
 
-### 5. Obsidian 归档
+#### 发帖方式说明
 
-将干货内容写入 Obsidian vault（如果用户配置了 vault 路径）：
-
-路径：`{{obsidian_vault}}/微信干货/YYYY-MM-DD.md`
-
-> 如果用户没有 Obsidian 或未配置 vault 路径，跳过此步骤。
-
-格式：同 Discord 推送内容（Markdown 格式），顶部加 frontmatter：
-
-```yaml
----
-date: YYYY-MM-DD
-tags: [wechat-digest, auto-generated]
-groups: [群名1, 群名2]
----
-```
+> 使用 OpenClaw `message` 工具，`action=thread-create`，`target={{forum_id}}`，
+> `threadName=帖子标题`，`message=帖子内容`，`appliedTags=["📰干货"]`。
+>
+> ⚠️ 如果 `message(action=thread-create)` 报错，改用 `exec` 执行 curl：
+> ```bash
+> curl -s -X POST "https://discord.com/api/v10/channels/{{forum_id}}/threads" \
+>   -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+>   -H "Content-Type: application/json" \
+>   -d '{"name":"帖子标题","applied_tags":["tag_id"],"message":{"content":"帖子内容"}}'
+> ```
+> Tag IDs 需要先用 `curl GET /channels/{{forum_id}}` 查 `available_tags` 获取。

@@ -1,9 +1,10 @@
 # wechat-assistant
 
-> description: "微信 AI 个人助手：自动从微信聊天中提取待办、日程、干货，推送到 Discord"
+> description: "WX Echo — 微信 AI 个人助手：自动从微信聊天中提取待办、日程、干货，推送到 Discord Forum，闭环追踪任务状态"
 
 ## Triggers
 
+- wx echo
 - wechat assistant
 - 微信助手
 - 设置微信助手
@@ -16,9 +17,9 @@
 
 ## Prerequisites
 
-- **macOS** + 微信桌面版 4.0+
+- **macOS** 或 **Windows** + 微信桌面版 4.0+
 - **Python 3.8+** + `pip3 install pycryptodome zstandard pyyaml`
-- **OpenClaw** 已配置 Discord
+- **OpenClaw** 已配置 Discord（需开启社区功能以支持 Forum 频道）
 - Python 依赖：`pycryptodome`, `zstandard`, `pyyaml`
 
 ## Architecture
@@ -141,20 +142,16 @@ python3 <skill_dir>/scripts/collector.py --config <config_path> --sync
 
 > ⚠️ Forum 频道需要服务器已开启"社区"功能（服务器设置 → 启用社区 → 开启论坛频道）。
 
-在用户指定的 Discord 类目下创建：
+在用户指定的 Discord 类目下创建 **1 个 Forum 频道**：
 
-#### 2 个 Forum 频道
+**echo-微信助手**
+- 使用 `message(action="channel-create", name="echo-微信助手", type=15)` 创建（type 15 = Forum）
+- 创建后添加 tags：`📋待办`、`📅日程`、`📰干货`
 
-1. **📋 WX-待办**
-   - 使用 `message(action="channel-create", name="📋 WX-待办", type=15)` 创建（type 15 = Forum）
-   - 创建后添加 tags：`🔴紧急`、`🟡跟进`、`✅已完成`
-2. **📅 WX-日程**
-   - 使用 `message(action="channel-create", name="📅 WX-日程", type=15)` 创建
-   - 创建后添加 tags：`📌已确认`、`🤔待确认`、`✅已过`
-
-#### 1 个 Thread（保持不变）
-
-3. **干货收集** — 在指定频道下创建 thread，使用 `message(action="thread-create")`
+> **闭环机制**：
+> - **待办**：每次 cron 扫描微信对话，自动追踪 open 待办的完成信号（对方说"搞定了"等）→ 回复原帖 + 关帖 + 更新 todos.json。对方催促时自动追加提醒，超时 7 天自动提醒未跟进。**用户也可以手动关闭帖子表示已完成**，下次 cron 会自动检测并更新状态。
+> - **日程**：事件时间过期后自动回复"日程已过"并关帖。
+> - **干货**：每日一帖，Forum 本身即归档，无需额外同步。
 
 ### Step 8: 注册 Cron 任务
 
@@ -164,13 +161,10 @@ python3 <skill_dir>/scripts/collector.py --config <config_path> --sync
 |--------|------|
 | `{{config_path}}` | config.yaml 的绝对路径 |
 | `{{skill_dir}}` | skill 根目录绝对路径 |
-| `{{todo_forum_id}}` | 待办论坛频道 ID |
-| `{{calendar_forum_id}}` | 日程论坛频道 ID |
-| `{{thread_id}}` | 干货收集 Thread ID |
+| `{{forum_id}}` | echo-微信助手 Forum 频道 ID |
 | `{{groups}}` | 监控群 ID 列表（逗号分隔） |
 | `{{ssh_host}}` | 微信所在机器的 SSH 地址（如果微信不在本机，留空表示本机直接执行） |
 | `{{ssh_password}}` | SSH 密码（配合 sshpass 使用） |
-| `{{obsidian_vault}}` | Obsidian vault 路径（可选，用于干货归档） |
 
 > **本机 vs 远程**：如果 OpenClaw 和微信在同一台机器上（常见情况），不需要 SSH，prompt 中的命令直接本地执行。只有 OpenClaw 在另一台机器时才需要 SSH。Agent 注册 cron 时根据情况决定是否包含 SSH 前缀。
 
